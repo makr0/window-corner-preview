@@ -58,6 +58,8 @@ const CORNER_BOTTOM_LEFT = 3;
 const DEFAULT_ZOOM = 0.20;
 const DEFAULT_CORNER = CORNER_TOP_RIGHT;
 
+const DEFAULT_ROTATION = 0;
+
 const DEFAULT_CROP_RATIO = 0.0; // [0.0 - 1.0]
 
 // Animation constants
@@ -67,7 +69,7 @@ const TWEEN_OPACITY_HALF = Math.round(TWEEN_OPACITY_FULL * 0.50);
 const TWEEN_OPACITY_TENTH = Math.round(TWEEN_OPACITY_FULL * 0.10);
 const TWEEN_OPACITY_NULL = 0;
 
-const TWEEN_TIME_SHORT = 0.25;
+const TWEEN_TIME_SHORT = 0.1;
 const TWEEN_TIME_MEDIUM = 0.6;
 const TWEEN_TIME_LONG = 0.80;
 
@@ -211,6 +213,7 @@ function CWindowPreview() {
     // Defaulting
     let _corner = DEFAULT_CORNER;
     let _zoom = DEFAULT_ZOOM;
+    let _rotation = DEFAULT_ROTATION;
 
     let _leftCropRatio = DEFAULT_CROP_RATIO;
     let _rightCropRatio = DEFAULT_CROP_RATIO;
@@ -255,6 +258,8 @@ function CWindowPreview() {
 
     self._onScroll = function (actor, event) {
         let scroll_direction = event.get_scroll_direction();
+        let [x, y, state] = global.get_pointer();
+
 
         let direction;
         switch (scroll_direction) {
@@ -296,6 +301,7 @@ function CWindowPreview() {
         const SCROLL_ACTOR_MARGIN = 0.2; // 20% margin length
         const SCROLL_ZOOM_STEP = 0.01; // 1% zoom for step
         const SCROLL_CROP_STEP = 0.0063; // 0.005;
+        const SCROLL_ROTATION_STEP = 360/20;
 
 
         let sortedDeltas = [
@@ -309,8 +315,12 @@ function CWindowPreview() {
 
         // Scrolling inside the preview triggers the zoom
         if (deltaMinimum.comparedDistance > SCROLL_ACTOR_MARGIN) {
-
-            self.zoom += direction * SCROLL_ZOOM_STEP;
+            // SHIFT: rotate instead of zoom
+            if (state & GDK_SHIFT_MASK) {
+                self.rotation += direction * SCROLL_ROTATION_STEP;
+            } else {
+                self.zoom += direction * SCROLL_ZOOM_STEP;
+            }
         }
 
         // Scrolling along the margins triggers the cropping instead
@@ -519,6 +529,8 @@ function CWindowPreview() {
         if (! mutw) return;
 
         let windowTexture = mutw.get_texture();
+        let rotationAxis = Clutter.RotateAxis.Z_AXIS;
+        let rotationCenter = new Clutter.Vertex();
         let [windowWidth, windowHeight] =  windowTexture.get_size();
 
         /* To crop the window texture, for now I've found that:
@@ -556,17 +568,19 @@ function CWindowPreview() {
         let rectMonitor = Main.layoutManager.getWorkAreaForMonitor(global.screen.get_current_monitor());
         let targetRatio = rectMonitor.width * self.zoom / windowWidth;
 
+
         // No magnification allowed (KNOWN ISSUE: there's no height control if used, it still needs optimizing)
         if (! SETTING_MAGNIFICATION_ALLOWED && targetRatio > 1.0) {
             targetRatio = 1.0;
             _zoom = windowWidth / rectMonitor.width; // do NOT set self.zoom or it will be looping!
         }
 
+
         let thumbnail = new Clutter.Clone({ // list parameters https://www.roojs.org/seed/gir-1.2-gtk-3.0/seed/Clutter.Clone.html
             source: windowTexture,
             reactive: false,
 
-            magnification_filter: Clutter.ScalingFilter.NEAREST, //NEAREST, //TRILINEAR,
+            magnification_filter: Clutter.ScalingFilter.TRILINEAR, //NEAREST, //TRILINEAR,
 
             translation_x: -margins.left * targetRatio,
             translation_y: -margins.top * targetRatio,
@@ -584,6 +598,9 @@ function CWindowPreview() {
             margin_top: 0
 
         });
+        rotationCenter.init(thumbnail.width / 2, thumbnail.height/2,0);
+        thumbnail.rotation_center_z = rotationCenter;
+        thumbnail.set_rotation_angle(rotationAxis, self.rotation);
 
         _container.foreach(function (actor) {
             actor.destroy();
@@ -650,6 +667,14 @@ _container.set_clip_to_allocation(true);
 
     self.__defineGetter__("zoom", function() {
         return _zoom;
+    });
+    self.__defineSetter__("rotation", function(value) {
+        _rotation = value;
+        self._onParamsChange();
+    });
+
+    self.__defineGetter__("rotation", function() {
+        return _rotation;
     });
 
     self.__defineSetter__("focusHidden", function(value) {
